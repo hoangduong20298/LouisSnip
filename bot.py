@@ -8,7 +8,7 @@ import logging
 # Replace with your Telegram bot API token
 API_TOKEN = '7117911467:AAECnzaC5ZgRqzrHOJwb49mx3bcZCaS-u2o'
 bot = telebot.TeleBot(API_TOKEN)
-
+bot.set_webhook()
 # GMGN API endpoint for top coins on Pump.fun buy
 GMGN_API_URL = "https://gmgn.ai/defi/quotation/v1/pairs/sol/new_pair_ranks/1m?limit=50"
 
@@ -50,23 +50,23 @@ def find_highest_volume_coin(coins):
     highest_volume_coin = max(coins, key=lambda coin: float(coin['base_token_info']['buy_volume_5m']), default=None)
     return highest_volume_coin
 
-# Function to send an alert message to Telegram
-import logging
-import telebot
-from datetime import datetime, timedelta
+def safe_float(value):
+    try:
+        return float(value)
+    except ValueError:
+        return 0.0
 
-import logging
-import telebot
-from datetime import datetime, timedelta
+
+
 def send_alert(coin_data):
     base_token_info = coin_data['base_token_info']
     contract_address = base_token_info.get('address', 'N/A')
-    burn_ratio = float(base_token_info.get('burn_ratio', 0)) * 100
-    top_10_holder_rate =float(base_token_info.get('top_10_holder_rate', 0)) * 100
+    burn_ratio = safe_float(base_token_info.get('burn_ratio', '0')) * 100
+    top_10_holder_rate = safe_float(base_token_info.get('top_10_holder_rate', '0')) * 100
+    creator_balance_usd = safe_float(coin_data.get('quote_reserve_usd', '0'))
     renounced_status = base_token_info.get('renounced', None)
     freeze_revoked_status = base_token_info.get('renounced_freeze_account', None)
     creator_balance_sol = coin_data.get('quote_reserve', 'N/A')
-    creator_balance_usd = coin_data.get('quote_reserve_usd', 'N/A')
     transactions = base_token_info.get('swaps_24h', 0)
 
     # Skip sending the alert if an alert has already been sent for this contract address within the past hour
