@@ -4,14 +4,15 @@ import telebot
 import threading
 from datetime import datetime, timedelta
 import logging
-
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import tls_client
 # Replace with your Telegram bot API token
 API_TOKEN = '7117911467:AAECnzaC5ZgRqzrHOJwb49mx3bcZCaS-u2o'
 bot = telebot.TeleBot(API_TOKEN)
 bot.set_webhook()
 CHANNEL_ID = '@louisgamblesmeme'  # or use channel ID as an integer
 # GMGN API endpoint for top coins on Pump.fun buy
-GMGN_API_URL = "https://gmgn.ai/defi/quotation/v1/pairs/sol/new_pair_ranks/1m?limit=100"
+GMGN_API_URL = "https://gmgn.ai/defi/quotation/v1/pairs/sol/new_pair_ranks/1m?limit=50"
 
 # Global variable to store the chat ID of the user who starts the bot
 user_chat_id = None
@@ -39,21 +40,25 @@ def start_bot(message):
 # Function to fetch data from the GMGN API
 def fetch_data():
     try:
-        response = requests.get(GMGN_API_URL)
-        response.raise_for_status()
-        data = response.json().get('data', {})
+        s = tls_client.Session(
+            client_identifier="firefox_104",random_tls_extension_order=True
+        )
+        response = s.get(GMGN_API_URL)
+        #response.raise_for_status()
+        if response.status_code == 200:
+            data = response.json().get('data', {})
+            # Combine all lists and include the source
+            combined_data = [
+                {**item, "source": "New Pool"} for item in data.get('new_pools', [])
+            ] + [
+                {**item, "source": "Burnts"} for item in data.get('burnts', [])
+            ] + [
+                {**item, "source": "Dexscreener Spents"} for item in data.get('dexscreener_spents', [])
+            ]
 
-        # Combine all lists and include the source
-        combined_data = [
-            {**item, "source": "New Pool"} for item in data.get('new_pools', [])
-        ] + [
-            {**item, "source": "Burnts"} for item in data.get('burnts', [])
-        ] + [
-            {**item, "source": "Dexscreener Spents"} for item in data.get('dexscreener_spents', [])
-        ]
-
-        return combined_data
-
+            return combined_data
+        else:
+            print(f"Request failed with status code: {response.status_code}")
     except requests.exceptions.RequestException as e:
         logging.error(f"Error fetching data: {e}")
         return []
@@ -61,28 +66,31 @@ def fetch_data():
 # Function to find the coin with the highest buy volume in the last 5 minutes
 def find_highest_volume_coin(coins):
     if not coins:
-        return None
+        return 0
 
     for coin in coins:
         # Log missing keys
         base_info = coin.get('base_token_info', {})
-        if 'buy_volume_5m' not in base_info:
-            logging.warning(f"Missing 'buy_volume_5m' in coin data: {base_info}")
-
+        if 'volume_5m' not in base_info:
+            continue
+           #logging.warning(f"Missing 'buy_volume_5m' in coin data: {base_info}")
     # Use the .get() method to handle missing keys and provide a default value of 0
-    highest_volume_coin = max(
+        highest_volume_coin = max(
         coins,
-        key=lambda coin: float(coin['base_token_info'].get('buy_volume_5m', 0)),
-        default=None
-    )
+        key=lambda coin: safe_float(coin['base_token_info'].get('volume_5m', 0)),
+        default=0
+        )
     return highest_volume_coin
 
 
 def safe_float(value):
-    try:
-        return float(value)
-    except ValueError:
+    if value == "":
         return 0.0
+    if value is not None:
+        result = float(value)
+    else:
+        result = 0.0
+    return result
 
 
 
@@ -92,8 +100,8 @@ def send_alert(coin_data):
     burn_ratio = safe_float(base_token_info.get('burn_ratio', '0')) * 100
     top_10_holder_rate = safe_float(base_token_info.get('top_10_holder_rate', '0')) * 100
     creator_balance_usd = safe_float(coin_data.get('quote_reserve_usd', '0'))
-    buy_volume = safe_float(base_token_info.get('buy_volume', '0'))
-    sell_volume = safe_float(base_token_info.get('sell_volume', '0'))
+    buy_volume = safe_float(base_token_info.get('buys', '0'))
+    sell_volume = safe_float(base_token_info.get('sells', '0'))
     renounced_status = base_token_info.get('renounced', None)
     freeze_revoked_status = base_token_info.get('renounced_freeze_account', None)
     creator_balance_sol = coin_data.get('quote_reserve', 'N/A')
@@ -103,7 +111,7 @@ def send_alert(coin_data):
     # Skip sending the alert if an alert has already been sent for this contract address within the past hour
     if contract_address in alerted_contracts:
         last_alert_time = alerted_contracts[contract_address]
-        if datetime.now() - last_alert_time < timedelta(minutes=5):
+        if datetime.now() - last_alert_time < timedelta(minutes=3):
            # logging.info(f"Skipped alert for {base_token_info['name']} ({base_token_info['symbol']}) as it was alerted recently.")
             return
 
@@ -114,14 +122,13 @@ def send_alert(coin_data):
     # Determine if the dev wallet has enough money and a decent history
     dev_wallet_status = "🟢 Dev Wallet Has Enough Money" if float(creator_balance_usd) > 500 else "🔴 Dev Wallet Might Not Have Enough Money"
     wallet_history_status = "🟢 Wallet Has Decent History" if transactions > 50 else "🔴 Wallet Has Limited History"
-
     # Compile the alert message
     message = (
         f"🪙 **Token**: {base_token_info['name']} ({base_token_info['symbol']})\n\n"
         f"🧩 **CA**: {contract_address}\n\n"
 
-        f"💡 **Market Cap**: ${float(base_token_info.get('market_cap', 0)):,}\n"
-        f"💧 **Liquidity**: ${float(base_token_info.get('liquidity', 0)):,}\n"
+        f"💡 **Market Cap**: ${safe_float(base_token_info.get('market_cap', 0)):,}\n"
+        f"💧 **Liquidity**: ${safe_float(base_token_info.get('liquidity', 0)):,}\n"
         f"💰 **Token Price**: ${base_token_info.get('price', 'N/A')}\n"
         f"⛽️ **Pooled SOL**: {coin_data.get('quote_reserve', 'N/A')} SOL\n"
         f"💰 **Buy Volume**: ${buy_volume:,}\n"
@@ -129,12 +136,12 @@ def send_alert(coin_data):
         f"🚀 **5m Change**: {price_change_percent5m:.2f}%\n"
         f"👥 **Holders**: {base_token_info.get('holder_count', 'N/A')}\n\n"
         f"🏦 **Top Holders rate**: {top_10_holder_rate:.2f}%\n\n"
-        f"🔥 **Burn Ratio**: {burn_ratio:.2f}%\n"
+        f"🔥 **Burn Ratio**: {safe_float(burn_ratio):.2f}%\n"
         f"👤 **Renounced**: {renounced_status_str}\n"
         f"🗯️ **Freeze Revoked**: {freeze_revoked_str}\n\n"
         f"👨🏻‍💻 **Creator Info**:\n"
         f"  - **Balance SOL**: {creator_balance_sol}\n"
-        f"  - **Balance USD**: ${float(creator_balance_usd):.2f}\n"
+        f"  - **Balance USD**: ${safe_float(creator_balance_usd):.2f}\n"
         f"  - **Transactions**: {transactions}\n"
         f"  - {dev_wallet_status}\n"
         f"  - {wallet_history_status}\n\n"
@@ -142,7 +149,7 @@ def send_alert(coin_data):
     )
 
         # Add the Fast Trade button for MEVX with a preview link name
-    fast_trade_link = f"[MEVX🚀](https://mevx.io/solana/{contract_address})"
+    fast_trade_link = f"[MEVX🚀](https://mevx.io/solana/{contract_address}?ref=louishd)"
     message += f"{fast_trade_link}\n\n"
 
 
@@ -159,11 +166,17 @@ def send_alert(coin_data):
 
         message += f"🔗 **Social Links**:\n{social_message}"
 
-
+    url_Mevx= f"https://mevx.io/solana/{contract_address}?ref=louishd"
+    url_ST= f"https://t.me/SolTradingBot?start={contract_address}-rtTFIhoCo"
+    # Add the Fast Trade button for MEVX with a preview link name
+    btn_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton(text='MevX 🚀', url=url_Mevx)],
+        [InlineKeyboardButton(text='STBOT 🚀', url=url_ST)],
+    ])
 
     if CHANNEL_ID:
         try:
-            bot.send_message(CHANNEL_ID, message, parse_mode='Markdown')
+            bot.send_message(CHANNEL_ID, message, parse_mode='Markdown', disable_web_page_preview=True,reply_markup=btn_markup)
             # Update the last alert time for this contract address
             alerted_contracts[contract_address] = datetime.now()
         except telebot.apihelper.ApiException as e:
@@ -183,11 +196,11 @@ def main():
                 base_token_info = highest_volume_coin['base_token_info']
                 contract_address = base_token_info.get('address', 'N/A')
                 # Print the coin details and send an alert
-                print(f"🚀 High Volume Coin: {base_token_info['name']} ({base_token_info['symbol']}) | Volume: {base_token_info['buy_volume_1m']} | Price: {base_token_info['price']} | Market Cap: {base_token_info['market_cap']} | Contract Address: {contract_address}| Source: {highest_volume_coin.get('source', 'Unknown Source')}")
+                print(f"🚀 High Volume Coin: {base_token_info['name']} ({base_token_info['symbol']}) | Volume: {base_token_info['volume_1m']} | Price: {base_token_info['price']} | Market Cap: {base_token_info['market_cap']} | Contract Address: {contract_address}| Source: {highest_volume_coin.get('source', 'Unknown Source')}")
                 send_alert(highest_volume_coin)
 
         # Wait for 1000 milliseconds before the next request
-        time.sleep(1)
+        time.sleep(5)
 
 # Start the bot polling in a separate thread
 threading.Thread(target=bot.polling, daemon=True).start()
