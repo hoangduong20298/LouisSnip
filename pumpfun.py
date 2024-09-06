@@ -28,10 +28,13 @@ def get_top_pumping_tokens(limit):
     limit = min(50, max(1, limit))
     GMGN_API_URL = f"https://gmgn.ai/defi/quotation/v1/rank/sol/pump?limit={limit}&orderby=progress&direction=desc&pump=true"
     try:
+        headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:101.0) Gecko/20100101 Firefox/101.0',
+        }
         s = tls_client.Session(
-        client_identifier="firefox_102",random_tls_extension_order=True
+        client_identifier="okhttp4_android_7",random_tls_extension_order=True
         )
-        response = s.get(GMGN_API_URL)
+        response = s.get(GMGN_API_URL,headers=headers)
             #print(response)
             #response.raise_for_status()
         if response.status_code == 200:
@@ -114,12 +117,11 @@ def send_alert(token):
     message= (
             f"{fire}\n"
             f"CA: {contract_address}\n"
-
             f"Symbol: {token.get('symbol', 'N/A')}\n"
             f"Name: {token.get('name', 'N/A')}\n"
             f"Price: ${safe_float(token.get('price', 'N/A')):.8f}\n"
             f"Market Cap: ${safe_float(token.get('usd_market_cap', 'N/A')):,.2f}\n"
-            f"**Age:** **{age}**\n"
+            f"Age: {age}\n"
             f"Progress: {safe_float(token.get('progress', 'N/A')):.2%}\n"
             f"Holder Count: {token.get('holder_count', 'N/A')}\n"
             f"**Top Holders rate**: {safe_float(token.get('top_10_holder_rate')):.2f}%\n\n"

@@ -40,10 +40,13 @@ def start_bot(message):
 # Function to fetch data from the GMGN API
 def fetch_data():
     try:
+        headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:101.0) Gecko/20100101 Firefox/101.0',
+        }
         s = tls_client.Session(
-            client_identifier="firefox_104",random_tls_extension_order=True
+            client_identifier="okhttp4_android_7",random_tls_extension_order=True
         )
-        response = s.get(GMGN_API_URL)
+        response = s.get(GMGN_API_URL,headers=headers)
         #response.raise_for_status()
         if response.status_code == 200:
             data = response.json().get('data', {})
@@ -71,13 +74,13 @@ def find_highest_volume_coin(coins):
     for coin in coins:
         # Log missing keys
         base_info = coin.get('base_token_info', {})
-        if 'volume_5m' not in base_info:
+        if 'price_change_percent1m' not in base_info:
             continue
            #logging.warning(f"Missing 'buy_volume_5m' in coin data: {base_info}")
     # Use the .get() method to handle missing keys and provide a default value of 0
         highest_volume_coin = max(
         coins,
-        key=lambda coin: safe_float(coin['base_token_info'].get('volume_5m', 0)),
+        key=lambda coin: safe_float(coin['base_token_info'].get('price_change_percent1m', 0)),
         default=0
         )
     return highest_volume_coin
@@ -196,7 +199,7 @@ def main():
                 base_token_info = highest_volume_coin['base_token_info']
                 contract_address = base_token_info.get('address', 'N/A')
                 # Print the coin details and send an alert
-                print(f"🚀 High Volume Coin: {base_token_info['name']} ({base_token_info['symbol']}) | Volume: {base_token_info['volume_1m']} | Price: {base_token_info['price']} | Market Cap: {base_token_info['market_cap']} | Contract Address: {contract_address}| Source: {highest_volume_coin.get('source', 'Unknown Source')}")
+                print(f"🚀 High Volume Coin: {base_token_info['name']} ({base_token_info['symbol']}) | Volume: {base_token_info['volume']} | Price: {base_token_info['price']} | Market Cap: {base_token_info['market_cap']} | Contract Address: {contract_address}| Source: {highest_volume_coin.get('source', 'Unknown Source')}")
                 send_alert(highest_volume_coin)
 
         # Wait for 1000 milliseconds before the next request
